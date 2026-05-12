@@ -23,7 +23,7 @@ Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
 $form = New-Object System.Windows.Forms.Form
-$form.Text = "Minify Dota 2 Patch Installer v3.2.1"
+$form.Text = "Minify Dota 2 Patch Installer"
 $form.Size = New-Object System.Drawing.Size(600,400)
 $form.StartPosition = "CenterScreen"
 $form.FormBorderStyle = "FixedDialog"
